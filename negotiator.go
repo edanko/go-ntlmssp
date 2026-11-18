@@ -5,6 +5,7 @@ package ntlmssp
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/base64"
 	"io"
 	"net/http"
@@ -247,11 +248,22 @@ func (l Negotiator) RoundTrip(req *http.Request) (*http.Response, error) {
 		drainResponse(originalResp)
 		return resp, nil
 	}
+	// The challenge arrives over the connection the exchange is bound to, so its
+	// TLS state is what a channel binding has to describe. Capture it before the
+	// response is drained.
+	channelBinding, err := channelBindingFor(challengeTLS(resp))
+	if err != nil {
+		drainResponse(resp)
+		drainResponse(originalResp)
+
+		return nil, err
+	}
+
 	resauth = newAuthHeader(resp.Header)
 	drainResponse(resp)
 
 	// Second step: process challenge and resend the original body with the authenticate message
-	resp = completeHandshake(rt, resauth, req, id, negotiate, l.WorkstationName)
+	resp = completeHandshake(rt, resauth, req, id, negotiate, handshakeOptions(l.WorkstationName, channelBinding, negotiate, req))
 	if resp == nil {
 		return originalResp, nil
 	}
@@ -304,7 +316,14 @@ func clientHandshake(rt http.RoundTripper, req *http.Request, schema string, dom
 	return res, auth
 }
 
-func completeHandshake(rt http.RoundTripper, resauth authheader, req *http.Request, id identity, negotiate []byte, workstation string) *http.Response {
+func completeHandshake(
+	rt http.RoundTripper,
+	resauth authheader,
+	req *http.Request,
+	id identity,
+	negotiate []byte,
+	options *AuthenticateMessageOptions,
+) *http.Response {
 	if rewindBody(req) != nil {
 		return nil
 	}
@@ -317,10 +336,7 @@ func completeHandshake(rt http.RoundTripper, resauth authheader, req *http.Reque
 		// otherwise the negotiation is over.
 		return nil
 	}
-	auth, err := NewAuthenticateMessage(challenge, id.username, id.password, &AuthenticateMessageOptions{
-		WorkstationName:  workstation,
-		NegotiateMessage: negotiate,
-	})
+	auth, err := NewAuthenticateMessage(challenge, id.username, id.password, options)
 	if err != nil {
 		return nil
 	}
@@ -330,4 +346,50 @@ func completeHandshake(rt http.RoundTripper, resauth authheader, req *http.Reque
 		return nil
 	}
 	return resp
+}
+
+// challengeTLS returns the TLS state of a response, or nil when the exchange runs
+// over a connection that is not TLS.
+func challengeTLS(res *http.Response) *tls.ConnectionState {
+	if res == nil {
+		return nil
+	}
+
+	return res.TLS
+}
+
+// channelBindingFor returns the GSS channel binding for a TLS state, and nil
+// when there is no TLS to bind.
+//
+// A plain HTTP connection has nothing to bind, so the value is absent rather
+// than wrong; an Extended-Protection site rejects that with 401, which is the
+// correct outcome and is documented on [Negotiator].
+func channelBindingFor(state *tls.ConnectionState) ([]byte, error) {
+	if state == nil {
+		return nil, nil
+	}
+
+	return makeChannelBinding(*state)
+}
+
+// handshakeOptions assembles the options for the AUTHENTICATE message, including
+// the negotiate message the MIC covers, the target name and the channel binding
+// that Extended Protection needs.
+func handshakeOptions(
+	workstation string,
+	channelBinding []byte,
+	negotiate []byte,
+	req *http.Request,
+) *AuthenticateMessageOptions {
+	options := &AuthenticateMessageOptions{
+		WorkstationName:  workstation,
+		NegotiateMessage: negotiate,
+		ChannelBinding:   channelBinding,
+	}
+
+	if req != nil {
+		options.TargetName = spnForHost(req.Host)
+	}
+
+	return options
 }

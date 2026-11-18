@@ -13,7 +13,7 @@ import (
 	"crypto/md5"
 	"strings"
 
-	"github.com/Azure/go-ntlmssp/internal/md4"
+	"github.com/edanko/go-ntlmssp/internal/md4"
 )
 
 func getNtlmV2Hash(password, username, domain string) []byte {

@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-module github.com/Azure/go-ntlmssp
+module github.com/edanko/go-ntlmssp
 
 go 1.24

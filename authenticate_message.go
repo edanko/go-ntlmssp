@@ -167,6 +167,23 @@ type AuthenticateMessageOptions struct {
 	// covering all three messages is added to the AUTHENTICATE message (MS-NLMP 3.1.5.1.2),
 	// protecting the handshake against tampering. If nil, no MIC is sent.
 	NegotiateMessage []byte
+
+	// ChannelBinding is the GSS channel binding of the TLS connection the
+	// exchange runs over, in the form returned by
+	// [Negotiator] from the server certificate; see [makeChannelBinding]. When
+	// set, it is placed in the MsvAvChannelBindings AV_PAIR of the target info
+	// (MS-NLMP 2.2.2.1), which is what IIS demands when the site enables
+	// Extended Protection.
+	//
+	// It is ignored when the server sent no target info, because there is no
+	// list to add it to.
+	ChannelBinding []byte
+
+	// TargetName is the service principal name of the endpoint, for example
+	// "HTTP/ca.example.com". When set, it is placed in the MsvAvTargetName
+	// AV_PAIR, which servers behind Extended Protection use to select the
+	// account to authenticate against.
+	TargetName string
 }
 
 // NewAuthenticateMessage creates a new AUTHENTICATE message in response to the CHALLENGE message
@@ -253,6 +270,14 @@ func NewAuthenticateMessage(challenge []byte, username, password string, options
 	}
 
 	targetInfo := cm.TargetInfoRaw
+
+	if options != nil && targetInfo != nil {
+		var err error
+		if targetInfo, err = withAVPairs(targetInfo, options.avPairs()...); err != nil {
+			return nil, err
+		}
+	}
+
 	if options != nil && options.NegotiateMessage != nil && cm.TargetInfo[avIDMsvAvTimestamp] != nil {
 		var err error
 		if targetInfo, err = withMICFlag(targetInfo); err != nil {

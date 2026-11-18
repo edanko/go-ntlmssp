@@ -9,7 +9,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/Azure/go-ntlmssp"
+	"github.com/edanko/go-ntlmssp"
 )
 
 // ExampleNegotiator demonstrates basic HTTPS authentication using NTLM.
